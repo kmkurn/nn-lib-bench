@@ -1,4 +1,0 @@
-['remote "local"']
-url = /Users/kemal/dvc-storage
-[core]
-remote = local
