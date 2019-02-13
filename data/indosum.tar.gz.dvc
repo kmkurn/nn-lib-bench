@@ -1,0 +1,6 @@
+md5: b556260bb09ff6c43e580654606395c8
+outs:
+- cache: true
+  md5: 9a78071bb2f48175dd27ff8f5226dfd7
+  metric: false
+  path: indosum.tar.gz
