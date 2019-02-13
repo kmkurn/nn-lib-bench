@@ -1,0 +1,10 @@
+cmd: mkdir indosum && tar -xvzf indosum.tar.gz -C indosum
+deps:
+- md5: 9a78071bb2f48175dd27ff8f5226dfd7
+  path: indosum.tar.gz
+md5: 7c77f4a247babb3f6ab49296daf36e53
+outs:
+- cache: true
+  md5: 2e546726771c6202f9d76d3d56195b20.dir
+  metric: false
+  path: indosum
