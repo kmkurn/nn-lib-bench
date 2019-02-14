@@ -1,0 +1,23 @@
+cmd: ../prepare_corpus.py indosum/train.01.jsonl > train.txt && ../prepare_corpus.py
+  indosum/dev.01.jsonl > dev.txt && ../prepare_corpus.py indosum/test.01.jsonl > test.txt
+deps:
+- md5: 823717ce9768c4d03a9dd052c13cbbce
+  path: indosum/train.01.jsonl
+- md5: 318887410a5bb983497de6f8a74111ad
+  path: indosum/dev.01.jsonl
+- md5: 6a6a3f392e6142b38eab3fe38398d396
+  path: indosum/test.01.jsonl
+md5: 2c2d0e3d721c82bdf02e1511d6f289ab
+outs:
+- cache: true
+  md5: 4b12c301d4da26989a003614a64ca1e2
+  metric: false
+  path: train.txt
+- cache: true
+  md5: 96029e60f3efa8bd26239e26898d4361
+  metric: false
+  path: dev.txt
+- cache: true
+  md5: 2a67822a37478d5e61e9fd7b97323c6f
+  metric: false
+  path: test.txt
