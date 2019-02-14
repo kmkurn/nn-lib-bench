@@ -99,8 +99,8 @@ class LanguageModel(nn.Module):
         # shape: (bsz * slen,)
         targets = targets.view(bsz * slen)
 
-        return F.cross_entropy(outputs, targets, ignore_index=self.word_emb.padding_idx)
-
+        return F.cross_entropy(
+            outputs, targets, ignore_index=self.word_emb.padding_idx, reduction='sum')
 
 
 def create_lm(
