@@ -1,2 +1,8 @@
+# Only installs PyTorch with a specific CUDA version
+torch
+
+# Make sure numpy is installed
+numpy
+
 pytest==4.2.1
 pytest-cov==2.6.1
