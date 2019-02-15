@@ -1,17 +1,16 @@
 #!/usr/bin/env python
 
+from datetime import timedelta
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Optional
 import argparse
 import logging
 import math
+import time
 
-from ignite.contrib.handlers import ProgressBar
-from ignite.engine import Engine, Events
-from ignite.metrics import Metric
-from text2array import Batch, Dataset, Vocab
+from text2array import Dataset, Vocab
+from tqdm import tqdm
 import torch
-import torch.optim as optim
 
 from nnlibbench import make_sample
 from nnlibbench.torch import create_lm
@@ -28,78 +27,43 @@ def train(
 ) -> None:
     logging.info('Reading train corpus from %s', trn_path)
     trn_dataset = read_corpus(trn_path, encoding=encoding)
-    trn_batches = Batches(trn_dataset, batch_size)
     dev_dataset = None
-    dev_batches = None
     if dev_path is not None:
         logging.info('Reading dev corpus from %s', dev_path)
         dev_dataset = read_corpus(dev_path, encoding=encoding)
-        dev_batches = Batches(dev_dataset, test_batch_size, shuffle=False)
 
-    logging.info('Create vocab and numericalize dataset(s)')
+    logging.info('Creating vocab and numericalizing dataset(s)')
     vocab = Vocab.from_samples(trn_dataset)
     trn_dataset.apply_vocab(vocab)
     if dev_dataset is not None:
         dev_dataset.apply_vocab(vocab)
 
-    logging.info('Create language model')
+    logging.info('Creating language model')
     padding_idx = vocab['words']['<pad>']
     model = create_lm(len(vocab['words']), len(vocab['chars']), padding_idx=padding_idx)
     logging.info('Model created with %d parameters', sum(p.numel() for p in model.parameters()))
 
-    logging.info('Create optimizer')
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    logging.info('Creating optimizer')
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    def _update(trainer: Engine, batch: Batch) -> dict:
-        ts = to_tensors(batch, pad_with=model.word_emb.padding_idx)
-        model.train()
-        loss = model(ts['words'], ts['chars'], ts['targets'])
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        return {
-            'loss': loss.item(),
-            'n_tokens': torch.sum(ts['words'] != padding_idx).item(),
-        }
+    logging.info('Starting training')
+    trn_start = time.time()
 
-    def _evaluate(engine: Engine, batch: Batch) -> dict:
-        ts = to_tensors(batch, pad_with=model.word_emb.padding_idx)
-        model.eval()
-        loss = model(ts['words'], ts['chars'], ts['targets'])
-        return {
-            'loss': loss.item(),
-            'n_tokens': torch.sum(ts['words'] != padding_idx).item(),
-        }
+    for epoch in range(1, max_epochs + 1):
+        logging.info('Starting epoch %d/%d', epoch, max_epochs)
+        train_epoch(model, optimizer, trn_dataset, batch_size, padding_idx=padding_idx)
+        logging.info('Epoch %d/%d completed', epoch, max_epochs)
 
-    # TODO manual progress bar to control what gets displayed
-    trainer = Engine(_update)
-    ProgressBar(persist=True, bar_format=None).attach(
-        trainer, output_transform=lambda out: {'loss': out['loss'] / out['n_tokens']})
-
-    evaluator = Engine(_evaluate)
-    ProgressBar(bar_format=None, desc='Evaluation').attach(evaluator)
-    Perplexity().attach(evaluator, 'ppl')
-
-    @trainer.on(Events.EPOCH_STARTED)
-    def on_epoch_started(engine: Engine) -> None:
-        logging.info('Starting epoch %d', engine.state.epoch)
-
-    @trainer.on(Events.EPOCH_COMPLETED)
-    def run_evaluation(engine: Engine) -> None:
-        logging.info('Epoch %d completed', engine.state.epoch)
         logging.info('Evaluating on train corpus')
-        evaluator.run(trn_batches)
-        logging.info('Result on TRAIN: ppl %.4f', evaluator.state.metrics['ppl'])
-        if dev_batches is not None:
-            logging.info('Evaluating on dev corpus')
-            evaluator.run(dev_batches)
-            logging.info('Result on DEV: ppl %.4f', evaluator.state.metrics['ppl'])
+        ppl = evaluate(model, trn_dataset, test_batch_size, padding_idx=padding_idx)
+        logging.info('Result on TRAIN: ppl %.4f', ppl)
 
-    try:
-        trainer.run(trn_batches, max_epochs=max_epochs)
-    except KeyboardInterrupt:
-        logging.info('Interrupt detected, terminating')
-        trainer.terminate()
+        if dev_dataset is not None:
+            logging.info('Evaluating on dev corpus')
+            ppl = evaluate(model, dev_dataset, test_batch_size, padding_idx=padding_idx)
+            logging.info('Result on DEV: ppl %.4f', ppl)
+
+    logging.info('Training completed in %s', timedelta(seconds=time.time() - trn_start))
 
 
 def read_corpus(path: Path, encoding: str = 'utf8') -> Dataset:
@@ -110,40 +74,52 @@ def read_corpus(path: Path, encoding: str = 'utf8') -> Dataset:
     return Dataset(samples)
 
 
-class Batches:
-    def __init__(self, dataset: Dataset, batch_size: int, shuffle: bool = True) -> None:
-        self.dataset = dataset
-        self.batch_size = batch_size
-        self.shuffle = shuffle
+def train_epoch(
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        dataset: Dataset,
+        batch_size: int,
+        padding_idx: int = 0,
+) -> None:
+    model.train()
+    pbar = tqdm(total=len(dataset), unit='sent')
 
-    def __iter__(self) -> Iterator[Batch]:
-        if self.shuffle:
-            self.dataset.shuffle_by(lambda s: len(s['words']))
-        return self.dataset.batch(self.batch_size)
+    for batch in dataset.shuffle_by(lambda s: len(s['words'])).batch(batch_size):
+        arr = batch.to_array(pad_with=padding_idx)
+        tsr = {k: torch.from_numpy(v) for k, v in arr.items()}
+        loss = model(tsr['words'], tsr['chars'], tsr['targets'])
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-    def __len__(self) -> int:
-        n = len(self.dataset) // self.batch_size
-        if len(self.dataset) % self.batch_size != 0:
-            n += 1
-        return n
+        n_tokens = (tsr['words'] != padding_idx).long().sum()
+        mean_loss = loss.item() / n_tokens.item()
+        pbar.set_postfix(mean_loss=mean_loss)
+        pbar.update(tsr['words'].size(0))
+
+    pbar.close()
 
 
-def to_tensors(batch: Batch, pad_with: int = 0) -> dict:
-    arr = batch.to_array(pad_with=pad_with)
-    return {k: torch.from_numpy(v) for k, v in arr.items()}
+def evaluate(
+        model: torch.nn.Module,
+        dataset: Dataset,
+        batch_size: int,
+        padding_idx: int = 0,
+) -> float:
+    model.eval()
+    pbar = tqdm(total=len(dataset), unit='sent')
+    tot_loss, tot_tokens = 0, 0
 
+    for batch in dataset.shuffle_by(lambda s: len(s['words']), scale=0).batch(batch_size):
+        arr = batch.to_array(pad_with=padding_idx)
+        tsr = {k: torch.from_numpy(v) for k, v in arr.items()}
+        loss = model(tsr['words'], tsr['chars'], tsr['targets'])
+        tot_loss += loss.item()
+        tot_tokens += (tsr['words'] != padding_idx).long().sum().item()
+        pbar.update(tsr['words'].size(0))
 
-class Perplexity(Metric):
-    def reset(self) -> None:
-        self.loss = 0
-        self.n_tokens = 0
-
-    def compute(self) -> float:
-        return math.exp(self.loss / self.n_tokens)
-
-    def update(self, output: dict) -> None:
-        self.loss += output['loss']
-        self.n_tokens += output['n_tokens']
+    pbar.close()
+    return math.exp(tot_loss / tot_tokens)
 
 
 if __name__ == '__main__':
@@ -159,8 +135,7 @@ if __name__ == '__main__':
     p.add_argument('--test-bsz', type=int, default=128, help='test batch size')
     args = p.parse_args()
 
-    logging.basicConfig(format='%(message)s', level=logging.INFO)
-    logging.getLogger('ignite.engine').setLevel(logging.ERROR)
+    logging.basicConfig(format='%(levelname)s - %(message)s', level=logging.INFO)
     train(
         args.path,
         encoding=args.encoding,
