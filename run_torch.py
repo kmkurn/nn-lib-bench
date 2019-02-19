@@ -23,7 +23,6 @@ def train(
         lr: float = 1e-3,
         max_epochs: int = 50,
         batch_size: int = 16,
-        test_batch_size: int = 128,
 ) -> None:
     logging.info('Reading train corpus from %s', trn_path)
     trn_dataset = read_corpus(trn_path, encoding=encoding)
@@ -40,7 +39,18 @@ def train(
 
     logging.info('Creating language model')
     padding_idx = vocab['words']['<pad>']
-    model = create_lm(len(vocab['words']), len(vocab['chars']), padding_idx=padding_idx)
+    # Find max possible filter width
+    max_width = 8
+    for dat in (trn_dataset, dev_dataset):
+        for s in dat:
+            max_width = min(max_width, len(s['words']))
+
+    model = create_lm(
+        len(vocab['words']),
+        len(vocab['chars']),
+        padding_idx=padding_idx,
+        filter_widths=list(range(1, max_width)),
+    )
     logging.info('Model created with %d parameters', sum(p.numel() for p in model.parameters()))
 
     logging.info('Creating optimizer')
@@ -55,13 +65,12 @@ def train(
         logging.info('Epoch %d/%d completed', epoch, max_epochs)
 
         logging.info('Evaluating on train corpus')
-        # TODO test_batch_size should be 1
-        ppl = evaluate(model, trn_dataset, test_batch_size, padding_idx=padding_idx)
+        ppl = evaluate(model, trn_dataset, padding_idx=padding_idx)
         logging.info('Result on TRAIN: ppl %.4f', ppl)
 
         if dev_dataset is not None:
             logging.info('Evaluating on dev corpus')
-            ppl = evaluate(model, dev_dataset, test_batch_size, padding_idx=padding_idx)
+            ppl = evaluate(model, dev_dataset, padding_idx=padding_idx)
             logging.info('Result on DEV: ppl %.4f', ppl)
 
     logging.info('Training completed in %s', timedelta(seconds=time.time() - trn_start))
@@ -108,14 +117,13 @@ def train_epoch(
 def evaluate(
         model: torch.nn.Module,
         dataset: Dataset,
-        batch_size: int,
         padding_idx: int = 0,
 ) -> float:
     model.eval()
     pbar = tqdm(total=len(dataset), unit='sent')
     tot_loss, tot_tokens = 0, 0
 
-    for batch in dataset.shuffle_by(lambda s: len(s['words']), scale=0).batch(batch_size):
+    for batch in dataset.batch(1):
         arr = batch.to_array(pad_with=padding_idx)
         tsr = {k: torch.from_numpy(v) for k, v in arr.items()}
         words = tsr['words'][:, :-1].contiguous()
@@ -141,7 +149,6 @@ if __name__ == '__main__':
     p.add_argument('--lr', type=float, default=1e-3, help='learning rate')
     p.add_argument('--max-epochs', type=int, default=50, help='max number of train epochs')
     p.add_argument('--bsz', type=int, default=16, help='train batch size')
-    p.add_argument('--test-bsz', type=int, default=128, help='test batch size')
     args = p.parse_args()
 
     logging.basicConfig(format='%(levelname)s - %(message)s', level=logging.INFO)
@@ -152,5 +159,4 @@ if __name__ == '__main__':
         lr=args.lr,
         max_epochs=args.max_epochs,
         batch_size=args.bsz,
-        test_batch_size=args.test_bsz,
     )
