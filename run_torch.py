@@ -61,8 +61,11 @@ def train(
 
     for epoch in range(1, max_epochs + 1):
         logging.info('Starting epoch %d/%d', epoch, max_epochs)
+        ep_start = time.time()
         train_epoch(model, optimizer, trn_dataset, batch_size, padding_idx=padding_idx)
-        logging.info('Epoch %d/%d completed', epoch, max_epochs)
+        logging.info(
+            'Epoch %d/%d completed in %s', epoch, max_epochs,
+            timedelta(seconds=time.time() - ep_start))
 
         logging.info('Evaluating on train corpus')
         ppl = evaluate(model, trn_dataset, padding_idx=padding_idx)
