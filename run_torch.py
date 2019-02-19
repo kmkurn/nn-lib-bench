@@ -55,6 +55,7 @@ def train(
         logging.info('Epoch %d/%d completed', epoch, max_epochs)
 
         logging.info('Evaluating on train corpus')
+        # TODO test_batch_size should be 1
         ppl = evaluate(model, trn_dataset, test_batch_size, padding_idx=padding_idx)
         logging.info('Result on TRAIN: ppl %.4f', ppl)
 
@@ -87,15 +88,19 @@ def train_epoch(
     for batch in dataset.shuffle_by(lambda s: len(s['words'])).batch(batch_size):
         arr = batch.to_array(pad_with=padding_idx)
         tsr = {k: torch.from_numpy(v) for k, v in arr.items()}
-        loss = model(tsr['words'], tsr['chars'], tsr['targets'])
+        words = tsr['words'][:, :-1].contiguous()
+        chars = tsr['chars'][:, :-1, :].contiguous()
+        targets = tsr['words'][:, 1:].contiguous()
+
+        loss = model(words, chars, targets)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        n_tokens = (tsr['words'] != padding_idx).long().sum()
+        n_tokens = (words != padding_idx).long().sum()
         mean_loss = loss.item() / n_tokens.item()
         pbar.set_postfix(mean_loss=mean_loss)
-        pbar.update(tsr['words'].size(0))
+        pbar.update(words.size(0))
 
     pbar.close()
 
@@ -113,10 +118,14 @@ def evaluate(
     for batch in dataset.shuffle_by(lambda s: len(s['words']), scale=0).batch(batch_size):
         arr = batch.to_array(pad_with=padding_idx)
         tsr = {k: torch.from_numpy(v) for k, v in arr.items()}
-        loss = model(tsr['words'], tsr['chars'], tsr['targets'])
+        words = tsr['words'][:, :-1].contiguous()
+        chars = tsr['chars'][:, :-1, :].contiguous()
+        targets = tsr['words'][:, 1:].contiguous()
+
+        loss = model(words, chars, targets)
         tot_loss += loss.item()
-        tot_tokens += (tsr['words'] != padding_idx).long().sum().item()
-        pbar.update(tsr['words'].size(0))
+        tot_tokens += (words != padding_idx).long().sum().item()
+        pbar.update(words.size(0))
 
     pbar.close()
     return math.exp(tot_loss / tot_tokens)

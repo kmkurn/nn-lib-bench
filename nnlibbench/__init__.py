@@ -6,11 +6,10 @@ def make_sample(text: str) -> Dict[str, Union[List[str], List[List[str]]]]:
 
     words = ['<s>']
     chars = [['<s>']]
-    targets = []
     for tok in toks:
         words.append(tok)
         chars.append(list(tok))
-        targets.append(tok)
-    targets.append('</s>')
+    words.append('</s>')
+    chars.append(['</s>'])
 
-    return {'words': words, 'chars': chars, 'targets': targets}
+    return {'words': words, 'chars': chars}
