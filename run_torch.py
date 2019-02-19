@@ -136,6 +136,8 @@ def evaluate(
         pbar.update(words.size(0))
 
     pbar.close()
+    logging.debug('Total loss: %.4f', tot_loss)
+    logging.debug('Total tokens: %d', tot_tokens)
     return math.exp(tot_loss / tot_tokens)
 
 
@@ -149,9 +151,13 @@ if __name__ == '__main__':
     p.add_argument('--lr', type=float, default=1e-3, help='learning rate')
     p.add_argument('--max-epochs', type=int, default=50, help='max number of train epochs')
     p.add_argument('--bsz', type=int, default=16, help='train batch size')
+    p.add_argument('--log-level', default='info', help='logging level')
     args = p.parse_args()
 
-    logging.basicConfig(format='%(levelname)s - %(message)s', level=logging.INFO)
+    logging.basicConfig(
+        format='%(levelname)s - %(message)s',
+        level=getattr(logging, args.log_level.upper()),
+    )
     train(
         args.path,
         encoding=args.encoding,
