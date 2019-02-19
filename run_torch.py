@@ -92,7 +92,7 @@ def train_epoch(
         padding_idx: int = 0,
 ) -> None:
     model.train()
-    pbar = tqdm(total=len(dataset), unit='sent')
+    pbar = tqdm(total=len(dataset), unit='sent', leave=False)
 
     for batch in dataset.shuffle_by(lambda s: len(s['words'])).batch(batch_size):
         arr = batch.to_array(pad_with=padding_idx)
@@ -120,7 +120,7 @@ def evaluate(
         padding_idx: int = 0,
 ) -> float:
     model.eval()
-    pbar = tqdm(total=len(dataset), unit='sent')
+    pbar = tqdm(total=len(dataset), unit='sent', leave=False)
     tot_loss, tot_tokens = 0, 0
 
     for batch in dataset.batch(1):
