@@ -32,16 +32,20 @@ def train(
         dev_dataset = read_corpus(dev_path, encoding=encoding)
 
     logging.info('Creating vocab and numericalizing dataset(s)')
+    start = time.time()
     vocab = Vocab.from_samples(trn_dataset)
     trn_dataset.apply_vocab(vocab)
     if dev_dataset is not None:
         dev_dataset.apply_vocab(vocab)
+    logging.debug('Done in %s', timedelta(seconds=time.time() - start))
 
     logging.info('Creating language model')
     padding_idx = vocab['words']['<pad>']
     # Find max possible filter width
     max_width = 8
     for dat in (trn_dataset, dev_dataset):
+        if dat is None:
+            continue
         for s in dat:
             max_width = min(max_width, len(s['words']))
 
