@@ -20,8 +20,9 @@ from nnlibbench.torch import create_lm
 def train(
         trn_path: Path,
         save_dir: Path,
-        encoding: str = 'utf8',
         dev_path: Optional[Path] = None,
+        vocab_path: Optional[Path] = None,
+        encoding: str = 'utf8',
         lr: float = 1e-3,
         max_epochs: int = 50,
         batch_size: int = 16,
@@ -30,31 +31,37 @@ def train(
     logging.info('Creating save directory if not exist in %s', save_dir)
     save_dir.mkdir(exist_ok=overwrite)
 
-    logging.info('Reading train corpus from %s', trn_path)
-    trn_dataset = read_corpus(trn_path, encoding=encoding)
+    logging.info('Reading/loading train data from %s', trn_path)
+    trn_dataset = read_or_load(trn_path, encoding=encoding)
     logging.info('Read %d train samples', len(trn_dataset))
     dev_dataset = None
     if dev_path is not None:
-        logging.info('Reading dev corpus from %s', dev_path)
-        dev_dataset = read_corpus(dev_path, encoding=encoding)
+        logging.info('Reading/loading dev data from %s', dev_path)
+        dev_dataset = read_or_load(dev_path, encoding=encoding, name='dev')
         logging.info('Read %d dev samples', len(dev_dataset))
 
-    logging.info('Creating vocab and numericalizing dataset(s)')
-    start = time.time()
-    vocab = Vocab.from_samples(trn_dataset)
-    trn_dataset.apply_vocab(vocab)
-    if dev_dataset is not None:
-        dev_dataset.apply_vocab(vocab)
-    logging.debug('Done in %s', timedelta(seconds=time.time() - start))
+    if vocab_path is None:
+        logging.info('Creating vocab and numericalizing dataset(s)')
+        start = time.time()
+        vocab = Vocab.from_samples(trn_dataset)
+        trn_dataset.apply_vocab(vocab)
+        if dev_dataset is not None:
+            dev_dataset.apply_vocab(vocab)
+        logging.debug('Done in %s', timedelta(seconds=time.time() - start))
 
-    logging.info('Saving vocab and datasets')
-    fnames = ['vocab.pkl', 'train-dataset.pkl', 'dev-dataset.pkl']
-    objs = [vocab, trn_dataset]
-    if dev_dataset is not None:
-        objs.append(dev_dataset)
-    for fname, obj in zip(fnames, objs):
-        with open(save_dir / fname, 'wb') as f:
-            pickle.dump(obj, f)
+        logging.info('Saving vocab and datasets')
+        fnames = ['vocab.pkl', 'train-dataset.pkl', 'dev-dataset.pkl']
+        objs = [vocab, trn_dataset]
+        if dev_dataset is not None:
+            objs.append(dev_dataset)
+        for fname, obj in zip(fnames, objs):
+            with open(save_dir / fname, 'wb') as f:
+                pickle.dump(obj, f)
+
+    else:
+        logging.info('Loading vocab from %s', vocab_path)
+        with open(vocab_path, 'rb') as fb:
+            vocab = pickle.load(fb)
 
     logging.info('Creating language model')
     padding_idx = vocab['words']['<pad>']
@@ -93,7 +100,11 @@ def train(
     logging.info('Training completed in %s', timedelta(seconds=time.time() - trn_start))
 
 
-def read_corpus(path: Path, encoding: str = 'utf8') -> Dataset:
+def read_or_load(path: Path, encoding: str = 'utf8', name: str = 'train') -> Dataset:
+    if path.name.endswith('.pkl'):
+        with open(path, 'rb') as fb:
+            return pickle.load(fb)
+
     samples = []
     with open(path, encoding=encoding) as f:
         for line in f:
@@ -174,10 +185,11 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(
         description='Run LM model built with PyTorch.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument('path', type=Path, help='path to train corpus file')
+    p.add_argument('path', type=Path, help='path to train corpus/dataset file')
     p.add_argument('save_dir', type=Path, help='save training artifacts here')
+    p.add_argument('--dev-path', type=Path, help='path to dev corpus/dataset file')
+    p.add_argument('--vocab-path', type=Path, help='path to vocab file')
     p.add_argument('--encoding', default='utf8', help='file encoding to use')
-    p.add_argument('--dev', type=Path, help='path to dev corpus file')
     p.add_argument('--lr', type=float, default=1e-3, help='learning rate')
     p.add_argument('--max-epochs', type=int, default=50, help='max number of train epochs')
     p.add_argument('--bsz', type=int, default=16, help='train batch size')
@@ -192,8 +204,9 @@ if __name__ == '__main__':
     train(
         args.path,
         args.save_dir,
+        dev_path=args.dev_path,
+        vocab_path=args.vocab_path,
         encoding=args.encoding,
-        dev_path=args.dev,
         lr=args.lr,
         max_epochs=args.max_epochs,
         batch_size=args.bsz,
