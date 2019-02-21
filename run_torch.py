@@ -26,10 +26,12 @@ def train(
 ) -> None:
     logging.info('Reading train corpus from %s', trn_path)
     trn_dataset = read_corpus(trn_path, encoding=encoding)
+    logging.info('Read %d train samples', len(trn_dataset))
     dev_dataset = None
     if dev_path is not None:
         logging.info('Reading dev corpus from %s', dev_path)
         dev_dataset = read_corpus(dev_path, encoding=encoding)
+        logging.info('Read %d dev samples', len(dev_dataset))
 
     logging.info('Creating vocab and numericalizing dataset(s)')
     start = time.time()
@@ -80,7 +82,9 @@ def read_corpus(path: Path, encoding: str = 'utf8') -> Dataset:
     samples = []
     with open(path, encoding=encoding) as f:
         for line in f:
-            samples.append(make_sample(line.rstrip()))
+            text = line.rstrip()
+            if text:
+                samples.append(make_sample(text))
     return Dataset(samples)
 
 
