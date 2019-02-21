@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 import argparse
 import logging
 import math
@@ -41,14 +41,7 @@ def train(
 
     logging.info('Creating language model')
     padding_idx = vocab['words']['<pad>']
-    # Find max possible filter width
-    max_width = 8
-    for dat in (trn_dataset, dev_dataset):
-        if dat is None:
-            continue
-        for s in dat:
-            max_width = min(max_width, len(s['words']))
-
+    max_width = get_max_filter_width([trn_dataset, dev_dataset])
     model = create_lm(
         len(vocab['words']),
         len(vocab['chars']),
@@ -89,6 +82,16 @@ def read_corpus(path: Path, encoding: str = 'utf8') -> Dataset:
         for line in f:
             samples.append(make_sample(line.rstrip()))
     return Dataset(samples)
+
+
+def get_max_filter_width(datasets: Iterable[Dataset]) -> int:
+    max_width = 8
+    for dat in datasets:
+        if dat is None:
+            continue
+        for s in dat:
+            max_width = min(max_width, len(s['words']))
+    return max_width
 
 
 def train_epoch(
