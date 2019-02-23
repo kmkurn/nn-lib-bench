@@ -197,18 +197,19 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(
         description='Run LM model built with PyTorch.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument('path', type=Path, help='path to train corpus/dataset file')
+    p.add_argument('train_path', type=Path, help='path to train corpus/dataset file')
     p.add_argument('save_dir', type=Path, help='save training artifacts here')
-    p.add_argument('--dev-path', type=Path, help='path to dev corpus/dataset file')
-    p.add_argument('--vocab-path', type=Path, help='path to vocab file (implies --numeric)')
+    p.add_argument('-d', '--dev-path', type=Path, help='path to dev corpus/dataset file')
+    p.add_argument(
+        '-v', '--vocab-path', type=Path, help='path to vocab file (implies --numeric)')
     p.add_argument('--encoding', default='utf8', help='file encoding to use')
     p.add_argument('--lr', type=float, default=1e-3, help='learning rate')
     p.add_argument('--max-epochs', type=int, default=50, help='max number of train epochs')
-    p.add_argument('--bsz', type=int, default=16, help='train batch size')
-    p.add_argument('--overwrite', action='store_true', help='overwrite save directory')
+    p.add_argument('-b', '--batch-size', type=int, default=16, help='train batch size')
+    p.add_argument('-w', '--overwrite', action='store_true', help='overwrite save directory')
     p.add_argument(
-        '--numeric', action='store_true', help='treat datasets as already numericalized')
-    p.add_argument('--log-level', default='info', help='logging level')
+        '-n', '--numeric', action='store_true', help='treat datasets as already numericalized')
+    p.add_argument('-l', '--log-level', default='info', help='logging level')
     args = p.parse_args()
 
     logging.basicConfig(
@@ -216,14 +217,14 @@ if __name__ == '__main__':
         level=getattr(logging, args.log_level.upper()),
     )
     train(
-        args.path,
+        args.train_path,
         args.save_dir,
         dev_path=args.dev_path,
         vocab_path=args.vocab_path,
         encoding=args.encoding,
         lr=args.lr,
         max_epochs=args.max_epochs,
-        batch_size=args.bsz,
+        batch_size=args.batch_size,
         overwrite=args.overwrite,
         numeric=args.numeric or args.vocab_path is not None,
     )
