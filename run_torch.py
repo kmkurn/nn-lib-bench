@@ -32,33 +32,28 @@ def train(
     logging.info('Creating save directory if not exist in %s', save_dir)
     save_dir.mkdir(exist_ok=overwrite)
 
-    logging.info('Reading/loading train data from %s', trn_path)
-    trn_dataset = read_or_load(trn_path, encoding=encoding)
-    logging.info('Read %d train samples', len(trn_dataset))
+    trn_dataset = read_or_load_dataset(trn_path, encoding=encoding)
     dev_dataset = None
     if dev_path is not None:
-        logging.info('Reading/loading dev data from %s', dev_path)
-        dev_dataset = read_or_load(dev_path, encoding=encoding, name='dev')
-        logging.info('Read %d dev samples', len(dev_dataset))
+        dev_dataset = read_or_load_dataset(dev_path, encoding=encoding, name='dev')
 
-    logging.info('Creating/loading vocabulary from %s', vocab_path)
-    vocab = read_or_load_vocab(trn_dataset, path=vocab_path)
-    for name in vocab:
-        logging.info('Found %d %s', len(vocab[name]), name)
+    vocab = create_or_load_vocab(trn_dataset, path=vocab_path)
 
     if not numeric:
-        logging.info('Numericalizing datasets')
+        logging.info('Numericalizing train dataset')
         trn_dataset.apply_vocab(vocab)
         if dev_dataset is not None:
+            logging.info('Numericalizing dev dataset')
             dev_dataset.apply_vocab(vocab)
 
-    logging.info('Saving vocab and datasets')
     fnames = ['vocab.pkl', 'train-dataset.pkl', 'dev-dataset.pkl']
     objs = [vocab, trn_dataset]
     if dev_dataset is not None:
         objs.append(dev_dataset)
     for fname, obj in zip(fnames, objs):
-        with open(save_dir / fname, 'wb') as f:
+        save_path = save_dir / fname
+        logging.info('Saving to %s', save_path)
+        with open(save_path, 'wb') as f:
             pickle.dump(obj, f)
 
     logging.info('Creating language model')
@@ -98,25 +93,37 @@ def train(
     logging.info('Training completed in %s', timedelta(seconds=time.time() - trn_start))
 
 
-def read_or_load(path: Path, encoding: str = 'utf8', name: str = 'train') -> Dataset:
+def read_or_load_dataset(path: Path, encoding: str = 'utf8', name: str = 'train') -> Dataset:
     if path.name.endswith('.pkl'):
+        logging.info('Loading %s dataset from %s', name, path)
         with open(path, 'rb') as fb:
-            return pickle.load(fb)
+            dataset = pickle.load(fb)
+    else:
+        logging.info('Reading %s corpus from %s', name, path)
+        samples = []
+        with open(path, encoding=encoding) as f:
+            for line in f:
+                text = line.rstrip()
+                if text:
+                    samples.append(make_sample(text))
+        dataset = Dataset(samples)
 
-    samples = []
-    with open(path, encoding=encoding) as f:
-        for line in f:
-            text = line.rstrip()
-            if text:
-                samples.append(make_sample(text))
-    return Dataset(samples)
+    logging.info('Found %d %s samples', len(dataset), name)
+    return dataset
 
 
-def read_or_load_vocab(dataset: Dataset, path: Optional[Path] = None) -> Vocab:
+def create_or_load_vocab(dataset: Dataset, path: Optional[Path] = None) -> Vocab:
     if path is None:
-        return Vocab.from_samples(dataset)
-    with open(path, 'rb') as fb:
-        return pickle.load(fb)
+        logging.info('Creating vocab from dataset with %d samples', len(dataset))
+        vocab = Vocab.from_samples(dataset)
+    else:
+        logging.info('Reading vocab from %s', path)
+        with open(path, 'rb') as fb:
+            vocab = pickle.load(fb)
+
+    for name in vocab:
+        logging.info('Found %d %s', len(vocab[name]), name)
+    return vocab
 
 
 def get_max_filter_width(datasets: Iterable[Dataset]) -> int:
