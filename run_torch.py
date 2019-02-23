@@ -73,24 +73,28 @@ def train(
     logging.info('Starting training')
     trn_start = time.time()
 
-    for epoch in range(1, max_epochs + 1):
-        logging.info('Starting epoch %d/%d', epoch, max_epochs)
-        ep_start = time.time()
-        train_epoch(model, optimizer, trn_dataset, batch_size, padding_idx=padding_idx)
-        logging.info(
-            'Epoch %d/%d completed in %s', epoch, max_epochs,
-            timedelta(seconds=time.time() - ep_start))
+    try:
+        for epoch in range(1, max_epochs + 1):
+            logging.info('Starting epoch %d/%d', epoch, max_epochs)
+            ep_start = time.time()
+            train_epoch(model, optimizer, trn_dataset, batch_size, padding_idx=padding_idx)
+            logging.info(
+                'Epoch %d/%d completed in %s', epoch, max_epochs,
+                timedelta(seconds=time.time() - ep_start))
 
-        logging.info('Evaluating on train corpus')
-        ppl = evaluate(model, trn_dataset, padding_idx=padding_idx)
-        logging.info('Result on TRAIN: ppl %.4f', ppl)
+            logging.info('Evaluating on train corpus')
+            ppl = evaluate(model, trn_dataset, padding_idx=padding_idx)
+            logging.info('Result on TRAIN: ppl %.4f', ppl)
 
-        if dev_dataset is not None:
-            logging.info('Evaluating on dev corpus')
-            ppl = evaluate(model, dev_dataset, padding_idx=padding_idx)
-            logging.info('Result on DEV: ppl %.4f', ppl)
+            if dev_dataset is not None:
+                logging.info('Evaluating on dev corpus')
+                ppl = evaluate(model, dev_dataset, padding_idx=padding_idx)
+                logging.info('Result on DEV: ppl %.4f', ppl)
 
-    logging.info('Training completed in %s', timedelta(seconds=time.time() - trn_start))
+    except KeyboardInterrupt:
+        logging.info('Interrupt detected, aborting training')
+    finally:
+        logging.info('Training completed in %s', timedelta(seconds=time.time() - trn_start))
 
 
 def read_or_load_dataset(path: Path, encoding: str = 'utf8', name: str = 'train') -> Dataset:
