@@ -27,6 +27,7 @@ def train(
         max_epochs: int = 50,
         batch_size: int = 16,
         overwrite: bool = False,
+        numeric: bool = False,
 ) -> None:
     logging.info('Creating save directory if not exist in %s', save_dir)
     save_dir.mkdir(exist_ok=overwrite)
@@ -40,28 +41,25 @@ def train(
         dev_dataset = read_or_load(dev_path, encoding=encoding, name='dev')
         logging.info('Read %d dev samples', len(dev_dataset))
 
-    if vocab_path is None:
-        logging.info('Creating vocab and numericalizing dataset(s)')
-        start = time.time()
-        vocab = Vocab.from_samples(trn_dataset)
+    logging.info('Creating/loading vocabulary from %s', vocab_path)
+    vocab = read_or_load_vocab(trn_dataset, path=vocab_path)
+    for name in vocab:
+        logging.info('Found %d %s', len(vocab[name]), name)
+
+    if not numeric:
+        logging.info('Numericalizing datasets')
         trn_dataset.apply_vocab(vocab)
         if dev_dataset is not None:
             dev_dataset.apply_vocab(vocab)
-        logging.debug('Done in %s', timedelta(seconds=time.time() - start))
 
-        logging.info('Saving vocab and datasets')
-        fnames = ['vocab.pkl', 'train-dataset.pkl', 'dev-dataset.pkl']
-        objs = [vocab, trn_dataset]
-        if dev_dataset is not None:
-            objs.append(dev_dataset)
-        for fname, obj in zip(fnames, objs):
-            with open(save_dir / fname, 'wb') as f:
-                pickle.dump(obj, f)
-
-    else:
-        logging.info('Loading vocab from %s', vocab_path)
-        with open(vocab_path, 'rb') as fb:
-            vocab = pickle.load(fb)
+    logging.info('Saving vocab and datasets')
+    fnames = ['vocab.pkl', 'train-dataset.pkl', 'dev-dataset.pkl']
+    objs = [vocab, trn_dataset]
+    if dev_dataset is not None:
+        objs.append(dev_dataset)
+    for fname, obj in zip(fnames, objs):
+        with open(save_dir / fname, 'wb') as f:
+            pickle.dump(obj, f)
 
     logging.info('Creating language model')
     padding_idx = vocab['words']['<pad>']
@@ -112,6 +110,13 @@ def read_or_load(path: Path, encoding: str = 'utf8', name: str = 'train') -> Dat
             if text:
                 samples.append(make_sample(text))
     return Dataset(samples)
+
+
+def read_or_load_vocab(dataset: Dataset, path: Optional[Path] = None) -> Vocab:
+    if path is None:
+        return Vocab.from_samples(dataset)
+    with open(path, 'rb') as fb:
+        return pickle.load(fb)
 
 
 def get_max_filter_width(datasets: Iterable[Dataset]) -> int:
@@ -188,12 +193,14 @@ if __name__ == '__main__':
     p.add_argument('path', type=Path, help='path to train corpus/dataset file')
     p.add_argument('save_dir', type=Path, help='save training artifacts here')
     p.add_argument('--dev-path', type=Path, help='path to dev corpus/dataset file')
-    p.add_argument('--vocab-path', type=Path, help='path to vocab file')
+    p.add_argument('--vocab-path', type=Path, help='path to vocab file (implies --numeric)')
     p.add_argument('--encoding', default='utf8', help='file encoding to use')
     p.add_argument('--lr', type=float, default=1e-3, help='learning rate')
     p.add_argument('--max-epochs', type=int, default=50, help='max number of train epochs')
     p.add_argument('--bsz', type=int, default=16, help='train batch size')
     p.add_argument('--overwrite', action='store_true', help='overwrite save directory')
+    p.add_argument(
+        '--numeric', action='store_true', help='treat datasets as already numericalized')
     p.add_argument('--log-level', default='info', help='logging level')
     args = p.parse_args()
 
@@ -211,4 +218,5 @@ if __name__ == '__main__':
         max_epochs=args.max_epochs,
         batch_size=args.bsz,
         overwrite=args.overwrite,
+        numeric=args.numeric or args.vocab_path is not None,
     )
