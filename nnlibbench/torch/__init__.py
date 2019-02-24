@@ -5,6 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# TODO separate into modules
+
+
 class Highway(nn.Module):
     def __init__(self, size: int, num_layers: int) -> None:
         super().__init__()
@@ -124,3 +127,22 @@ def create_lm(
     output_layer = nn.Linear(lstm.hidden_size, num_words)
 
     return LanguageModel(word_emb, char_emb, char_convs, highway, lstm, output_layer)
+
+
+class LMLoss(nn.Module):
+    def __init__(self, padding_idx: int = -100) -> None:
+        super().__init__()
+        self._padding_idx = padding_idx
+
+    def forward(self, scores: torch.Tensor, targets: torch.LongTensor) -> torch.Tensor:
+        assert scores.dim() == 3
+        assert targets.shape == scores.shape[:2]
+        # scores shape: (bsz, slen, num_words)
+        # targets shape: (bsz, slen)
+
+        # shape: (bsz * slen, num_words)
+        scores = scores.view(-1, scores.size(-1))
+        # shape: (bsz * slen,)
+        targets = targets.view(-1)
+
+        return F.cross_entropy(scores, targets, ignore_index=self._padding_idx)
