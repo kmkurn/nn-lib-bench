@@ -48,15 +48,12 @@ class LanguageModel(nn.Module):
             self,
             words: torch.LongTensor,
             chars: torch.LongTensor,
-            targets: torch.LongTensor,
     ) -> torch.Tensor:
         assert words.dim() == 2
         assert chars.dim() == 3
         assert chars.shape[:2] == words.shape
-        assert targets.shape == words.shape
         # words shape: (bsz, slen)
         # chars shape: (bsz, slen, wlen)
-        # targets shape: (bsz, slen)
 
         bsz, slen, wlen = chars.shape
 
@@ -94,13 +91,7 @@ class LanguageModel(nn.Module):
         # shape: (bsz, slen, num_words)
         outputs = self.output_layer(outputs)
 
-        # shape: (bsz * slen, num_words)
-        outputs = outputs.view(bsz * slen, -1)
-        # shape: (bsz * slen,)
-        targets = targets.view(bsz * slen)
-
-        return F.cross_entropy(
-            outputs, targets, ignore_index=self.word_emb.padding_idx, reduction='sum')
+        return outputs
 
 
 def create_lm(
