@@ -2,19 +2,21 @@
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Tuple
 import argparse
 import logging
 import math
 import pickle
-import time
 
-from text2array import Dataset, Vocab
-from tqdm import tqdm
+from ignite.contrib.handlers import ProgressBar
+from ignite.engine import Engine, Events
+from ignite.handlers import Timer
+from ignite.metrics import Loss, MetricsLambda
+from text2array import Batch, Dataset, Vocab
 import torch
 
 from nnlibbench import make_sample
-from nnlibbench.torch import create_lm
+from nnlibbench.torch import LMLoss, create_lm
 
 
 def train(
@@ -32,12 +34,15 @@ def train(
     logging.info('Creating save directory if not exist in %s', save_dir)
     save_dir.mkdir(exist_ok=overwrite)
 
+    ### Read/create/load datasets and vocab
+
     trn_dataset = read_or_load_dataset(trn_path, encoding=encoding)
+    vocab = create_or_load_vocab(trn_dataset, path=vocab_path)
     dev_dataset = None
     if dev_path is not None:
         dev_dataset = read_or_load_dataset(dev_path, encoding=encoding, name='dev')
 
-    vocab = create_or_load_vocab(trn_dataset, path=vocab_path)
+    ### Numericalize datasets
 
     if not numeric:
         logging.info('Numericalizing train dataset')
@@ -45,6 +50,8 @@ def train(
         if dev_dataset is not None:
             logging.info('Numericalizing dev dataset')
             dev_dataset.apply_vocab(vocab)
+
+    ### Save vocab and datasets
 
     fnames = ['vocab.pkl', 'train-dataset.pkl', 'dev-dataset.pkl']
     objs = [vocab, trn_dataset]
@@ -56,6 +63,8 @@ def train(
         with open(save_path, 'wb') as f:
             pickle.dump(obj, f)
 
+    ### Create model, optimizer, and loss fn
+
     logging.info('Creating language model')
     padding_idx = vocab['words']['<pad>']
     max_width = get_max_filter_width([trn_dataset, dev_dataset])
@@ -66,35 +75,88 @@ def train(
         filter_widths=list(range(1, max_width)),
     )
     logging.info('Model created with %d parameters', sum(p.numel() for p in model.parameters()))
-
-    logging.info('Creating optimizer')
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    loss_fn = LMLoss(padding_idx=padding_idx)
 
-    logging.info('Starting training')
-    trn_start = time.time()
+    ### Prepare engines
+
+    def batch2tensors(
+            batch: Batch) -> Tuple[torch.LongTensor, torch.LongTensor, torch.LongTensor]:
+        arr = batch.to_array(pad_with=padding_idx)
+        tsr = {k: torch.from_numpy(v) for k, v in arr.items()}
+        words = tsr['words'][:, :-1].contiguous()
+        chars = tsr['chars'][:, :-1, :].contiguous()
+        targets = tsr['words'][:, 1:].contiguous()
+        return words, chars, targets
+
+    def train_process(engine: Engine, batch: Batch) -> float:
+        model.train()
+        words, chars, targets = batch2tensors(batch)
+        outputs = model(words, chars)
+        loss = loss_fn(outputs, targets)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        return loss.item()
+
+    def eval_process(engine: Engine, batch: Batch) -> Tuple[torch.Tensor, torch.LongTensor]:
+        model.eval()
+        with torch.no_grad():
+            words, chars, targets = batch2tensors(batch)
+            return model(words, chars), targets
+
+    trainer = Engine(train_process)
+    evaluator = Engine(eval_process)
+
+    ### Attach handlers and metrics
+
+    epoch_timer = Timer()
+    epoch_timer.attach(trainer, start=Events.EPOCH_STARTED, pause=Events.EPOCH_COMPLETED)
+    trn_pbar = ProgressBar(bar_format=None, unit='batch')
+    trn_pbar.attach(
+        trainer, output_transform=lambda loss: {
+            'loss': loss,
+            'ppl': math.exp(loss)
+        })
+    eval_pbar = ProgressBar(bar_format=None, unit='sent')
+    eval_pbar.attach(evaluator)
+
+    loss = Loss(loss_fn, batch_size=lambda tgt: (tgt != padding_idx).long().sum().item())
+    ppl = MetricsLambda(math.exp, loss)
+    loss.attach(evaluator, 'loss')
+    ppl.attach(evaluator, 'ppl')
+
+    @trainer.on(Events.EPOCH_STARTED)
+    def start_epoch(engine: Engine) -> None:
+        logging.info('[Epoch %d/%d] Starting', engine.state.epoch, engine.state.max_epochs)
+
+    @trainer.on(Events.EPOCH_COMPLETED)
+    def complete_epoch(engine: Engine) -> None:
+        logging.info(
+            '[Epoch %d/%d] Done in %s', engine.state.epoch, engine.state.max_epochs,
+            timedelta(seconds=epoch_timer.value()))
+        logging.info(
+            '[Epoch %d/%d] Evaluating on train corpus', engine.state.epoch,
+            engine.state.max_epochs)
+        evaluator.run(list(trn_dataset.batch(1)))
+        if dev_dataset is not None:
+            logging.info(
+                '[Epoch %d/%d] Evaluating on dev corpus', engine.state.epoch,
+                engine.state.max_epochs)
+            evaluator.run(list(dev_dataset.batch(1)))
+
+    @evaluator.on(Events.COMPLETED)
+    def print_metrics(engine: Engine) -> None:
+        loss = engine.state.metrics['loss']
+        ppl = engine.state.metrics['ppl']
+        logging.info('|| loss %.4f | ppl %.4f', loss, ppl)
+
+    ### Start training
 
     try:
-        for epoch in range(1, max_epochs + 1):
-            logging.info('Starting epoch %d/%d', epoch, max_epochs)
-            ep_start = time.time()
-            train_epoch(model, optimizer, trn_dataset, batch_size, padding_idx=padding_idx)
-            logging.info(
-                'Epoch %d/%d completed in %s', epoch, max_epochs,
-                timedelta(seconds=time.time() - ep_start))
-
-            logging.info('Evaluating on train corpus')
-            ppl = evaluate(model, trn_dataset, padding_idx=padding_idx)
-            logging.info('Result on TRAIN: ppl %.4f', ppl)
-
-            if dev_dataset is not None:
-                logging.info('Evaluating on dev corpus')
-                ppl = evaluate(model, dev_dataset, padding_idx=padding_idx)
-                logging.info('Result on DEV: ppl %.4f', ppl)
-
+        trainer.run(list(trn_dataset.batch(batch_size)), max_epochs=max_epochs)
     except KeyboardInterrupt:
-        logging.info('Interrupt detected, aborting training')
-    finally:
-        logging.info('Training completed in %s', timedelta(seconds=time.time() - trn_start))
+        trainer.terminate()
 
 
 def read_or_load_dataset(path: Path, encoding: str = 'utf8', name: str = 'train') -> Dataset:
@@ -140,63 +202,6 @@ def get_max_filter_width(datasets: Iterable[Dataset]) -> int:
     return max_width
 
 
-def train_epoch(
-        model: torch.nn.Module,
-        optimizer: torch.optim.Optimizer,
-        dataset: Dataset,
-        batch_size: int,
-        padding_idx: int = 0,
-) -> None:
-    model.train()
-    pbar = tqdm(total=len(dataset), unit='sent', leave=False)
-
-    for batch in dataset.shuffle_by(lambda s: len(s['words'])).batch(batch_size):
-        arr = batch.to_array(pad_with=padding_idx)
-        tsr = {k: torch.from_numpy(v) for k, v in arr.items()}
-        words = tsr['words'][:, :-1].contiguous()
-        chars = tsr['chars'][:, :-1, :].contiguous()
-        targets = tsr['words'][:, 1:].contiguous()
-
-        loss = model(words, chars, targets)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        n_tokens = (words != padding_idx).long().sum()
-        mean_loss = loss.item() / n_tokens.item()
-        pbar.set_postfix(mean_loss=mean_loss)
-        pbar.update(words.size(0))
-
-    pbar.close()
-
-
-def evaluate(
-        model: torch.nn.Module,
-        dataset: Dataset,
-        padding_idx: int = 0,
-) -> float:
-    model.eval()
-    pbar = tqdm(total=len(dataset), unit='sent', leave=False)
-    tot_loss, tot_tokens = 0, 0
-
-    for batch in dataset.batch(1):
-        arr = batch.to_array(pad_with=padding_idx)
-        tsr = {k: torch.from_numpy(v) for k, v in arr.items()}
-        words = tsr['words'][:, :-1].contiguous()
-        chars = tsr['chars'][:, :-1, :].contiguous()
-        targets = tsr['words'][:, 1:].contiguous()
-
-        loss = model(words, chars, targets)
-        tot_loss += loss.item()
-        tot_tokens += (words != padding_idx).long().sum().item()
-        pbar.update(words.size(0))
-
-    pbar.close()
-    logging.debug('Total loss: %.4f', tot_loss)
-    logging.debug('Total tokens: %d', tot_tokens)
-    return math.exp(tot_loss / tot_tokens)
-
-
 if __name__ == '__main__':
     p = argparse.ArgumentParser(
         description='Run LM model built with PyTorch.',
@@ -220,6 +225,9 @@ if __name__ == '__main__':
         format='%(levelname)s - %(message)s',
         level=getattr(logging, args.log_level.upper()),
     )
+    # Turn off ignite's logging so tqdm pbar can actually disappears
+    logging.getLogger('ignite').setLevel('CRITICAL')
+
     train(
         args.train_path,
         args.save_dir,

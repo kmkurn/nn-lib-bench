@@ -1,6 +1,7 @@
 -r requirements-test.txt
 flake8==3.7.5
 flake8-mypy==17.8.0
+pytorch-ignite==0.1.2
 text2array==0.0.4
 tqdm==4.31.1
 yapf==0.26.0
