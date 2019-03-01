@@ -35,7 +35,7 @@ def train(
     logging.info('Creating save directory if not exist in %s', save_dir)
     save_dir.mkdir()
 
-    ### Read/create/load datasets and vocab
+    ### Read/create/load samples and vocab
 
     trn_samples = read_or_load_samples(trn_path, encoding=encoding)
     vocab = create_or_load_vocab(trn_samples, path=vocab_path)
@@ -43,7 +43,7 @@ def train(
     if dev_path is not None:
         dev_samples = read_or_load_samples(dev_path, encoding=encoding, name='dev')
 
-    ### Numericalize datasets
+    ### Numericalize samples
 
     if not numeric:
         logging.info('Numericalizing train samples')
@@ -52,7 +52,7 @@ def train(
             logging.info('Numericalizing dev samples')
             dev_samples = list(vocab.apply_to(dev_samples))
 
-    ### Save vocab and datasets
+    ### Save vocab and samples
 
     fnames = ['vocab.pkl', 'train-samples.pkl', 'dev-samples.pkl']
     objs = [vocab, trn_samples]
@@ -204,7 +204,7 @@ def read_or_load_samples(
         name: str = 'train',
 ) -> Sequence[Sample]:
     if path.name.endswith('.pkl'):
-        logging.info('Loading %s dataset from %s', name, path)
+        logging.info('Loading %s samples from %s', name, path)
         with open(path, 'rb') as fb:
             samples = pickle.load(fb)
     else:
@@ -248,9 +248,9 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(
         description='Run LM model built with PyTorch.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument('train_path', type=Path, help='path to train corpus/dataset file')
+    p.add_argument('train_path', type=Path, help='path to train samples file')
     p.add_argument('save_dir', type=Path, help='save training artifacts here')
-    p.add_argument('-d', '--dev-path', type=Path, help='path to dev corpus/dataset file')
+    p.add_argument('-d', '--dev-path', type=Path, help='path to dev samples file')
     p.add_argument(
         '-v', '--vocab-path', type=Path, help='path to vocab file (implies --numeric)')
     p.add_argument('--encoding', default='utf8', help='file encoding to use')
@@ -259,7 +259,7 @@ if __name__ == '__main__':
     p.add_argument('-b', '--batch-size', type=int, default=16, help='train batch size')
     p.add_argument('-p', '--patience', type=int, default=5, help='patience for early stopping')
     p.add_argument(
-        '-n', '--numeric', action='store_true', help='treat datasets as already numericalized')
+        '-n', '--numeric', action='store_true', help='treat samples as already numericalized')
     p.add_argument('-l', '--log-level', default='info', help='logging level')
     p.add_argument('-s', '--seed', type=int, default=0, help='random seed')
     args = p.parse_args()
