@@ -7,6 +7,7 @@ import argparse
 import logging
 import math
 import pickle
+import random
 
 from ignite.contrib.handlers import ProgressBar
 from ignite.engine import Engine, Events
@@ -151,9 +152,9 @@ def train(
 
     ### Start training
 
+    iterator = ShuffleIterator(trn_samples, key=lambda s: len(s['words']))
+    iterator = BatchIterator(iterator, batch_size=batch_size)
     try:
-        iterator = ShuffleIterator(trn_samples, key=lambda s: len(s['words']))
-        iterator = BatchIterator(iterator, batch_size=batch_size)
         trainer.run(iterator, max_epochs=max_epochs)
     except KeyboardInterrupt:
         trainer.terminate()
@@ -222,6 +223,7 @@ if __name__ == '__main__':
     p.add_argument(
         '-n', '--numeric', action='store_true', help='treat datasets as already numericalized')
     p.add_argument('-l', '--log-level', default='info', help='logging level')
+    p.add_argument('-s', '--seed', type=int, default=0, help='random seed')
     args = p.parse_args()
 
     logging.basicConfig(
@@ -230,6 +232,10 @@ if __name__ == '__main__':
     )
     # Turn off ignite's logging so tqdm pbar can actually disappears
     logging.getLogger('ignite').setLevel('CRITICAL')
+
+    # Set random seed
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
 
     train(
         args.train_path,
