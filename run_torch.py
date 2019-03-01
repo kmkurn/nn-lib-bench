@@ -11,7 +11,7 @@ import random
 
 from ignite.contrib.handlers import ProgressBar
 from ignite.engine import Engine, Events
-from ignite.handlers import Timer, ModelCheckpoint
+from ignite.handlers import EarlyStopping, ModelCheckpoint, Timer
 from ignite.metrics import Loss, MetricsLambda
 from text2array import Batch, BatchIterator, ShuffleIterator, Vocab
 import torch
@@ -29,6 +29,7 @@ def train(
         lr: float = 1e-3,
         max_epochs: int = 50,
         batch_size: int = 16,
+        patience: int = 5,
         overwrite: bool = False,
         numeric: bool = False,
 ) -> None:
@@ -143,7 +144,7 @@ def train(
         ckptr_engine = trainer
     else:
         ckptr_kwargs = {
-            'score_function': lambda engine: -engine.state.metrics['ppl'],
+            'score_function': lambda eng: -eng.state.metrics['ppl'],
             'score_name': 'dev_ppl'
         }
         ckptr_engine = dev_evaluator
@@ -154,6 +155,12 @@ def train(
             'model': model,
             'optimizer': optimizer
         })
+
+    ### Attach early stopper
+
+    if dev_samples is not None:
+        early_stopper = EarlyStopping(patience, lambda eng: -eng.state.metrics['ppl'], trainer)
+        dev_evaluator.add_event_handler(Events.EPOCH_COMPLETED, early_stopper)
 
     ### Attach custom handlers
 
@@ -251,6 +258,7 @@ if __name__ == '__main__':
     p.add_argument('--lr', type=float, default=1e-3, help='learning rate')
     p.add_argument('--max-epochs', type=int, default=50, help='max number of train epochs')
     p.add_argument('-b', '--batch-size', type=int, default=16, help='train batch size')
+    p.add_argument('-p', '--patience', type=int, default=5, help='patience for early stopping')
     p.add_argument('-w', '--overwrite', action='store_true', help='overwrite save directory')
     p.add_argument(
         '-n', '--numeric', action='store_true', help='treat datasets as already numericalized')
@@ -259,11 +267,11 @@ if __name__ == '__main__':
     args = p.parse_args()
 
     logging.basicConfig(
-        format='%(levelname)s - %(message)s',
+        format='%(levelname)s (%(name)s) %(message)s',
         level=getattr(logging, args.log_level.upper()),
     )
-    # Turn off ignite's logging so tqdm pbar can actually disappears
-    logging.getLogger('ignite').setLevel('CRITICAL')
+    # Turn off ignite.engine's logging so tqdm pbar can actually disappears
+    logging.getLogger('ignite.engine').setLevel('CRITICAL')
 
     # Set random seed
     random.seed(args.seed)
@@ -278,6 +286,7 @@ if __name__ == '__main__':
         lr=args.lr,
         max_epochs=args.max_epochs,
         batch_size=args.batch_size,
+        patience=args.patience,
         overwrite=args.overwrite,
         numeric=args.numeric or args.vocab_path is not None,
     )
