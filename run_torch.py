@@ -11,7 +11,7 @@ import random
 
 from ignite.contrib.handlers import ProgressBar
 from ignite.engine import Engine, Events
-from ignite.handlers import Timer
+from ignite.handlers import Timer, ModelCheckpoint
 from ignite.metrics import Loss, MetricsLambda
 from text2array import Batch, BatchIterator, ShuffleIterator, Vocab
 import torch
@@ -107,12 +107,25 @@ def train(
             return model(words, chars), targets
 
     trainer = Engine(train_process)
-    evaluator = Engine(eval_process)
+    trn_evaluator = Engine(eval_process)
+    dev_evaluator = Engine(eval_process)
 
-    ### Attach handlers and metrics
+    ### Attach metrics
+
+    loss = Loss(loss_fn, batch_size=lambda tgt: (tgt != padding_idx).long().sum().item())
+    ppl = MetricsLambda(math.exp, loss)
+    loss.attach(trn_evaluator, 'loss')
+    loss.attach(dev_evaluator, 'loss')
+    ppl.attach(trn_evaluator, 'ppl')
+    ppl.attach(dev_evaluator, 'ppl')
+
+    ### Attach timers
 
     epoch_timer = Timer()
     epoch_timer.attach(trainer, start=Events.EPOCH_STARTED, pause=Events.EPOCH_COMPLETED)
+
+    ### Attach progress bars
+
     trn_pbar = ProgressBar(bar_format=None, unit='batch', desc='Training')
     trn_pbar.attach(
         trainer, output_transform=lambda loss: {
@@ -120,12 +133,29 @@ def train(
             'ppl': math.exp(loss)
         })
     eval_pbar = ProgressBar(bar_format=None, unit='sent', desc='Evaluating')
-    eval_pbar.attach(evaluator)
+    eval_pbar.attach(trn_evaluator)
+    eval_pbar.attach(dev_evaluator)
 
-    loss = Loss(loss_fn, batch_size=lambda tgt: (tgt != padding_idx).long().sum().item())
-    ppl = MetricsLambda(math.exp, loss)
-    loss.attach(evaluator, 'loss')
-    ppl.attach(evaluator, 'ppl')
+    ### Attach checkpointers
+
+    if dev_samples is None:
+        ckptr_kwargs: dict = {'save_interval': 1, 'n_saved': 5}
+        ckptr_engine = trainer
+    else:
+        ckptr_kwargs = {
+            'score_function': lambda engine: -engine.state.metrics['ppl'],
+            'score_name': 'dev_ppl'
+        }
+        ckptr_engine = dev_evaluator
+    ckptr = ModelCheckpoint(
+        str(save_dir / 'ckpts'), 'ckpt', save_as_state_dict=True, **ckptr_kwargs)
+    ckptr_engine.add_event_handler(
+        Events.EPOCH_COMPLETED, ckptr, {
+            'model': model,
+            'optimizer': optimizer
+        })
+
+    ### Attach custom handlers
 
     @trainer.on(Events.EPOCH_STARTED)
     def start_epoch(engine: Engine) -> None:
@@ -139,12 +169,13 @@ def train(
             '[Epoch %d/%d] Done in %s', epoch, max_epochs,
             timedelta(seconds=epoch_timer.value()))
         logging.info('[Epoch %d/%d] Evaluating on train corpus', epoch, max_epochs)
-        evaluator.run(BatchIterator(trn_samples))
+        trn_evaluator.run(BatchIterator(trn_samples))
         if dev_samples is not None:
             logging.info('[Epoch %d/%d] Evaluating on dev corpus', epoch, max_epochs)
-            evaluator.run(BatchIterator(dev_samples))
+            dev_evaluator.run(BatchIterator(dev_samples))
 
-    @evaluator.on(Events.COMPLETED)
+    @trn_evaluator.on(Events.COMPLETED)
+    @dev_evaluator.on(Events.COMPLETED)
     def print_metrics(engine: Engine) -> None:
         loss = engine.state.metrics['loss']
         ppl = engine.state.metrics['ppl']
@@ -157,6 +188,7 @@ def train(
     try:
         trainer.run(iterator, max_epochs=max_epochs)
     except KeyboardInterrupt:
+        logging.info('Interrupt detected, aborting training')
         trainer.terminate()
 
 
