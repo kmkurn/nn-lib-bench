@@ -30,11 +30,10 @@ def train(
         max_epochs: int = 50,
         batch_size: int = 16,
         patience: int = 5,
-        overwrite: bool = False,
         numeric: bool = False,
 ) -> None:
     logging.info('Creating save directory if not exist in %s', save_dir)
-    save_dir.mkdir(exist_ok=overwrite)
+    save_dir.mkdir()
 
     ### Read/create/load datasets and vocab
 
@@ -259,7 +258,6 @@ if __name__ == '__main__':
     p.add_argument('--max-epochs', type=int, default=50, help='max number of train epochs')
     p.add_argument('-b', '--batch-size', type=int, default=16, help='train batch size')
     p.add_argument('-p', '--patience', type=int, default=5, help='patience for early stopping')
-    p.add_argument('-w', '--overwrite', action='store_true', help='overwrite save directory')
     p.add_argument(
         '-n', '--numeric', action='store_true', help='treat datasets as already numericalized')
     p.add_argument('-l', '--log-level', default='info', help='logging level')
@@ -287,6 +285,5 @@ if __name__ == '__main__':
         max_epochs=args.max_epochs,
         batch_size=args.batch_size,
         patience=args.patience,
-        overwrite=args.overwrite,
         numeric=args.numeric or args.vocab_path is not None,
     )
