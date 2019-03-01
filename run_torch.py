@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional, Sequence, Tuple
 import argparse
 import logging
 import math
@@ -12,10 +12,10 @@ from ignite.contrib.handlers import ProgressBar
 from ignite.engine import Engine, Events
 from ignite.handlers import Timer
 from ignite.metrics import Loss, MetricsLambda
-from text2array import Batch, Dataset, Vocab
+from text2array import Batch, BatchIterator, ShuffleIterator, Vocab
 import torch
 
-from nnlibbench import make_sample
+from nnlibbench import Sample, make_sample
 from nnlibbench.torch import LMLoss, create_lm
 
 
@@ -36,27 +36,27 @@ def train(
 
     ### Read/create/load datasets and vocab
 
-    trn_dataset = read_or_load_dataset(trn_path, encoding=encoding)
-    vocab = create_or_load_vocab(trn_dataset, path=vocab_path)
-    dev_dataset = None
+    trn_samples = read_or_load_samples(trn_path, encoding=encoding)
+    vocab = create_or_load_vocab(trn_samples, path=vocab_path)
+    dev_samples = None
     if dev_path is not None:
-        dev_dataset = read_or_load_dataset(dev_path, encoding=encoding, name='dev')
+        dev_samples = read_or_load_samples(dev_path, encoding=encoding, name='dev')
 
     ### Numericalize datasets
 
     if not numeric:
-        logging.info('Numericalizing train dataset')
-        trn_dataset.apply_vocab(vocab)
-        if dev_dataset is not None:
-            logging.info('Numericalizing dev dataset')
-            dev_dataset.apply_vocab(vocab)
+        logging.info('Numericalizing train samples')
+        trn_samples = list(vocab.apply_to(trn_samples))
+        if dev_samples is not None:
+            logging.info('Numericalizing dev samples')
+            dev_samples = list(vocab.apply_to(dev_samples))
 
     ### Save vocab and datasets
 
-    fnames = ['vocab.pkl', 'train-dataset.pkl', 'dev-dataset.pkl']
-    objs = [vocab, trn_dataset]
-    if dev_dataset is not None:
-        objs.append(dev_dataset)
+    fnames = ['vocab.pkl', 'train-samples.pkl', 'dev-samples.pkl']
+    objs = [vocab, trn_samples]
+    if dev_samples is not None:
+        objs.append(dev_samples)
     for fname, obj in zip(fnames, objs):
         save_path = save_dir / fname
         logging.info('Saving to %s', save_path)
@@ -67,7 +67,7 @@ def train(
 
     logging.info('Creating language model')
     padding_idx = vocab['words']['<pad>']
-    max_width = get_max_filter_width([trn_dataset, dev_dataset])
+    max_width = get_max_filter_width([trn_samples, dev_samples])
     model = create_lm(
         len(vocab['words']),
         len(vocab['chars']),
@@ -112,13 +112,13 @@ def train(
 
     epoch_timer = Timer()
     epoch_timer.attach(trainer, start=Events.EPOCH_STARTED, pause=Events.EPOCH_COMPLETED)
-    trn_pbar = ProgressBar(bar_format=None, unit='batch')
+    trn_pbar = ProgressBar(bar_format=None, unit='batch', desc='Training')
     trn_pbar.attach(
         trainer, output_transform=lambda loss: {
             'loss': loss,
             'ppl': math.exp(loss)
         })
-    eval_pbar = ProgressBar(bar_format=None, unit='sent')
+    eval_pbar = ProgressBar(bar_format=None, unit='sent', desc='Evaluating')
     eval_pbar.attach(evaluator)
 
     loss = Loss(loss_fn, batch_size=lambda tgt: (tgt != padding_idx).long().sum().item())
@@ -132,56 +132,59 @@ def train(
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def complete_epoch(engine: Engine) -> None:
+        epoch = engine.state.epoch
+        max_epochs = engine.state.max_epochs
         logging.info(
-            '[Epoch %d/%d] Done in %s', engine.state.epoch, engine.state.max_epochs,
+            '[Epoch %d/%d] Done in %s', epoch, max_epochs,
             timedelta(seconds=epoch_timer.value()))
-        logging.info(
-            '[Epoch %d/%d] Evaluating on train corpus', engine.state.epoch,
-            engine.state.max_epochs)
-        evaluator.run(list(trn_dataset.batch(1)))
-        if dev_dataset is not None:
-            logging.info(
-                '[Epoch %d/%d] Evaluating on dev corpus', engine.state.epoch,
-                engine.state.max_epochs)
-            evaluator.run(list(dev_dataset.batch(1)))
+        logging.info('[Epoch %d/%d] Evaluating on train corpus', epoch, max_epochs)
+        evaluator.run(BatchIterator(trn_samples))
+        if dev_samples is not None:
+            logging.info('[Epoch %d/%d] Evaluating on dev corpus', epoch, max_epochs)
+            evaluator.run(BatchIterator(dev_samples))
 
     @evaluator.on(Events.COMPLETED)
     def print_metrics(engine: Engine) -> None:
         loss = engine.state.metrics['loss']
         ppl = engine.state.metrics['ppl']
-        logging.info('|| loss %.4f | ppl %.4f', loss, ppl)
+        logging.info('||| loss %.4f | ppl %.4f', loss, ppl)
 
     ### Start training
 
     try:
-        trainer.run(list(trn_dataset.batch(batch_size)), max_epochs=max_epochs)
+        iterator = ShuffleIterator(trn_samples, key=lambda s: len(s['words']))
+        iterator = BatchIterator(iterator, batch_size=batch_size)
+        trainer.run(iterator, max_epochs=max_epochs)
     except KeyboardInterrupt:
         trainer.terminate()
 
 
-def read_or_load_dataset(path: Path, encoding: str = 'utf8', name: str = 'train') -> Dataset:
+def read_or_load_samples(
+        path: Path,
+        encoding: str = 'utf8',
+        name: str = 'train',
+) -> Sequence[Sample]:
     if path.name.endswith('.pkl'):
         logging.info('Loading %s dataset from %s', name, path)
         with open(path, 'rb') as fb:
-            dataset = pickle.load(fb)
+            samples = pickle.load(fb)
     else:
-        logging.info('Reading %s corpus from %s', name, path)
+        logging.info('Reading %s samples from %s', name, path)
         samples = []
         with open(path, encoding=encoding) as f:
             for line in f:
                 text = line.rstrip()
                 if text:
                     samples.append(make_sample(text))
-        dataset = Dataset(samples)
 
-    logging.info('Found %d %s samples', len(dataset), name)
-    return dataset
+    logging.info('Found %d %s samples', len(samples), name)
+    return samples
 
 
-def create_or_load_vocab(dataset: Dataset, path: Optional[Path] = None) -> Vocab:
+def create_or_load_vocab(samples: Sequence[Sample], path: Optional[Path] = None) -> Vocab:
     if path is None:
-        logging.info('Creating vocab from dataset with %d samples', len(dataset))
-        vocab = Vocab.from_samples(dataset)
+        logging.info('Creating vocab from %d samples', len(samples))
+        vocab = Vocab.from_samples(samples)
     else:
         logging.info('Reading vocab from %s', path)
         with open(path, 'rb') as fb:
@@ -192,12 +195,12 @@ def create_or_load_vocab(dataset: Dataset, path: Optional[Path] = None) -> Vocab
     return vocab
 
 
-def get_max_filter_width(datasets: Iterable[Dataset]) -> int:
+def get_max_filter_width(samples_iter: Iterable[Optional[Sequence[Sample]]]) -> int:
     max_width = 8
-    for dat in datasets:
-        if dat is None:
+    for samples in samples_iter:
+        if samples is None:
             continue
-        for s in dat:
+        for s in samples:
             max_width = min(max_width, len(s['words']))
     return max_width
 
