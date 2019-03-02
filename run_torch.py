@@ -242,8 +242,7 @@ if __name__ == '__main__':
     p.add_argument('train_path', type=Path, help='path to train samples file')
     p.add_argument('save_dir', type=Path, help='save training artifacts here')
     p.add_argument('-d', '--dev-path', type=Path, help='path to dev samples file')
-    p.add_argument(
-        '-v', '--vocab-path', type=Path, help='path to vocab file (implies --numeric)')
+    p.add_argument('-v', '--vocab-path', type=Path, help='path to vocab file')
     p.add_argument('--encoding', default='utf8', help='file encoding to use')
     p.add_argument('--lr', type=float, default=1e-3, help='learning rate')
     p.add_argument('--max-epochs', type=int, default=50, help='max number of train epochs')
@@ -277,6 +276,6 @@ if __name__ == '__main__':
         max_epochs=args.max_epochs,
         batch_size=args.batch_size,
         patience=args.patience,
-        numeric=args.numeric or args.vocab_path is not None,
+        numeric=args.numeric,
         device=args.device,
     )
