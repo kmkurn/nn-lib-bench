@@ -135,7 +135,7 @@ def train(
         }
         ckptr_engine = dev_evaluator
     ckptr = ModelCheckpoint(
-        str(save_dir / 'ckpts'), 'ckpt', save_as_state_dict=True, **ckptr_kwargs)
+        str(save_dir / 'checkpoints'), 'ckpt', save_as_state_dict=True, **ckptr_kwargs)
     ckptr_engine.add_event_handler(
         Events.EPOCH_COMPLETED, ckptr, {
             'model': model,
