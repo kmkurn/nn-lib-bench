@@ -11,7 +11,7 @@ def test_forward():
     words = torch.randint(1, model.num_words, (bsz, slen), dtype=torch.long)
     chars = torch.randint(1, model.num_chars, (bsz, slen, wlen), dtype=torch.long)
 
-    scores = model(words, chars)
+    scores = model({'words': words, 'chars': chars})
     assert torch.is_tensor(scores)
     assert scores.shape == (bsz, slen, model.num_words)
     scores.sum().backward()  # assert no error

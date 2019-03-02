@@ -1,9 +1,8 @@
-from typing import List, Optional
+from typing import List, Mapping, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 
 # TODO separate into modules
 
@@ -47,11 +46,10 @@ class LanguageModel(nn.Module):
     def num_chars(self) -> int:
         return self.char_emb.num_embeddings
 
-    def forward(
-            self,
-            words: torch.LongTensor,
-            chars: torch.LongTensor,
-    ) -> torch.Tensor:
+    def forward(self, inputs: Mapping[str, torch.LongTensor]) -> torch.Tensor:
+        words = inputs['words']
+        chars = inputs['chars']
+
         assert words.dim() == 2
         assert chars.dim() == 3
         assert chars.shape[:2] == words.shape

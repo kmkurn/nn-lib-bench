@@ -10,7 +10,7 @@ import pickle
 import random
 
 from ignite.contrib.handlers import ProgressBar
-from ignite.engine import Engine, Events
+from ignite.engine import Engine, Events, create_supervised_evaluator, create_supervised_trainer
 from ignite.handlers import EarlyStopping, ModelCheckpoint, Timer
 from ignite.metrics import Loss, MetricsLambda
 from text2array import Batch, BatchIterator, ShuffleIterator, Vocab
@@ -82,33 +82,20 @@ def train(
     ### Prepare engines
 
     def batch2tensors(
-            batch: Batch) -> Tuple[torch.LongTensor, torch.LongTensor, torch.LongTensor]:
+            batch: Batch,
+            device: Optional[str] = None,
+            non_blocking: Optional[bool] = None,
+    ) -> Tuple[dict, torch.LongTensor]:
         arr = batch.to_array(pad_with=padding_idx)
         tsr = {k: torch.from_numpy(v) for k, v in arr.items()}
         words = tsr['words'][:, :-1].contiguous()
         chars = tsr['chars'][:, :-1, :].contiguous()
         targets = tsr['words'][:, 1:].contiguous()
-        return words, chars, targets
+        return {'words': words, 'chars': chars}, targets
 
-    def train_process(engine: Engine, batch: Batch) -> float:
-        model.train()
-        words, chars, targets = batch2tensors(batch)
-        outputs = model(words, chars)
-        loss = loss_fn(outputs, targets)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        return loss.item()
-
-    def eval_process(engine: Engine, batch: Batch) -> Tuple[torch.Tensor, torch.LongTensor]:
-        model.eval()
-        with torch.no_grad():
-            words, chars, targets = batch2tensors(batch)
-            return model(words, chars), targets
-
-    trainer = Engine(train_process)
-    trn_evaluator = Engine(eval_process)
-    dev_evaluator = Engine(eval_process)
+    trainer = create_supervised_trainer(model, optimizer, loss_fn, prepare_batch=batch2tensors)
+    trn_evaluator = create_supervised_evaluator(model, prepare_batch=batch2tensors)
+    dev_evaluator = create_supervised_evaluator(model, prepare_batch=batch2tensors)
 
     ### Attach metrics
 
