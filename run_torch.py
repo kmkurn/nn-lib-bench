@@ -31,6 +31,7 @@ def train(
         batch_size: int = 16,
         patience: int = 5,
         numeric: bool = False,
+        device: Optional[str] = None,
 ) -> None:
     logging.info('Creating save directory if not exist in %s', save_dir)
     save_dir.mkdir()
@@ -87,15 +88,18 @@ def train(
             non_blocking: Optional[bool] = None,
     ) -> Tuple[dict, torch.LongTensor]:
         arr = batch.to_array(pad_with=padding_idx)
-        tsr = {k: torch.from_numpy(v) for k, v in arr.items()}
+        tsr = {k: torch.from_numpy(v).to(device=device) for k, v in arr.items()}
         words = tsr['words'][:, :-1].contiguous()
         chars = tsr['chars'][:, :-1, :].contiguous()
         targets = tsr['words'][:, 1:].contiguous()
         return {'words': words, 'chars': chars}, targets
 
-    trainer = create_supervised_trainer(model, optimizer, loss_fn, prepare_batch=batch2tensors)
-    trn_evaluator = create_supervised_evaluator(model, prepare_batch=batch2tensors)
-    dev_evaluator = create_supervised_evaluator(model, prepare_batch=batch2tensors)
+    trainer = create_supervised_trainer(
+        model, optimizer, loss_fn, device=device, prepare_batch=batch2tensors)
+    trn_evaluator = create_supervised_evaluator(
+        model, device=device, prepare_batch=batch2tensors)
+    dev_evaluator = create_supervised_evaluator(
+        model, device=device, prepare_batch=batch2tensors)
 
     ### Attach metrics
 
@@ -247,6 +251,7 @@ if __name__ == '__main__':
     p.add_argument('-p', '--patience', type=int, default=5, help='patience for early stopping')
     p.add_argument(
         '-n', '--numeric', action='store_true', help='treat samples as already numericalized')
+    p.add_argument('--device', help='run on this device (e.g. "cpu", "cuda", "cuda:0")')
     p.add_argument('-l', '--log-level', default='info', help='logging level')
     p.add_argument('-s', '--seed', type=int, default=0, help='random seed')
     args = p.parse_args()
@@ -273,4 +278,5 @@ if __name__ == '__main__':
         batch_size=args.batch_size,
         patience=args.patience,
         numeric=args.numeric or args.vocab_path is not None,
+        device=args.device,
     )
