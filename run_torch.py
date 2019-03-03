@@ -18,6 +18,7 @@ import torch
 
 from nnlibbench import Sample, make_sample
 from nnlibbench.torch import LMLoss, create_lm
+from nnlibbench.torch.serialization import dump
 
 
 def train(
@@ -79,6 +80,12 @@ def train(
     logging.info('Model created with %d parameters', sum(p.numel() for p in model.parameters()))
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = LMLoss(padding_idx=padding_idx)
+
+    ### Save model metadata
+
+    metadata_path = save_dir / 'metadata.yml'
+    logging.info('Saving model metadata to %s', metadata_path)
+    metadata_path.write_text(dump(model), encoding='utf8')
 
     ### Prepare engines
 
