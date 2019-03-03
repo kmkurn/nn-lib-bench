@@ -13,6 +13,14 @@ class Highway(nn.Module):
         self.linears = nn.ModuleList([nn.Linear(size, size) for _ in range(num_layers)])
         self.gates = nn.ModuleList([nn.Linear(size, size) for _ in range(num_layers)])
 
+    @property
+    def size(self) -> int:
+        return self.linears[0].in_features
+
+    @property
+    def num_layers(self) -> int:
+        return len(self.linears)
+
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         for gate, linear in zip(self.gates, self.linears):
             t = torch.sigmoid(gate(inputs))

@@ -4,5 +4,6 @@ torch
 # Make sure numpy is installed
 numpy
 
+camel==0.1.2
 pytest==4.2.1
 pytest-cov==2.6.1
