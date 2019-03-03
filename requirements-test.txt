@@ -1,5 +1,8 @@
-# Only installs PyTorch with a specific CUDA version
+# Only install PyTorch with a specific CUDA version
 torch
+
+# Install release version of dynet, CPU-only
+dynet
 
 # Make sure numpy is installed
 numpy
