@@ -12,7 +12,7 @@ class TestInit:
     def test_ok(self):
         num_words, num_chars = 10, 5
         m = dy.ParameterCollection()
-        model = LMBuilder(m, num_words, num_chars)
+        model = LMBuilder(num_words, num_chars, m)
         assert model.num_words == num_words
         assert model.num_chars == num_chars
         # Word embedding layer
@@ -62,7 +62,7 @@ class TestInit:
             'lstm_size': 300,
         }
         m = dy.ParameterCollection()
-        model = LMBuilder(m, num_words, num_chars, **kwargs)
+        model = LMBuilder(num_words, num_chars, m, **kwargs)
         assert model.word_emb.shape()[1] == kwargs['word_emb_size']
         assert model.char_emb.shape()[1] == kwargs['char_emb_size']
         assert np.linalg.norm(model.word_emb[kwargs['padding_idx']].value()) == pytest.approx(
@@ -87,7 +87,7 @@ def test_forward():
     random.seed(0)
 
     m = dy.ParameterCollection()
-    model = LMBuilder(m, 10, 5)
+    model = LMBuilder(10, 5, m)
     slen, wlen = 3, 10
     words = [random.randrange(model.num_words) for _ in range(slen)]
     chars = [[random.randrange(model.num_chars) for _ in range(wlen)] for _ in range(slen)]

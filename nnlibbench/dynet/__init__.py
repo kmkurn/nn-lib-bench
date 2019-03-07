@@ -6,9 +6,9 @@ import dynet as dy
 class LMBuilder:
     def __init__(
             self,
-            m: dy.ParameterCollection,
             num_words: int,
             num_chars: int,
+            m: dy.ParameterCollection,
             word_emb_size: int = 300,
             char_emb_size: int = 15,
             padding_idx: int = 0,
@@ -31,9 +31,9 @@ class LMBuilder:
             m.add_parameters((w, char_emb_size, n)) for w, n in zip(filter_widths, num_filters)
         ]
         input_dim = word_emb_size + sum(p.shape()[2] for p in self.cconv_filters)
-        self.highway = HighwayBuilder(m, input_dim, num_layers=highway_layers)
+        self.highway = HighwayBuilder(input_dim, m, num_layers=highway_layers)
         self.lstm = dy.VanillaLSTMBuilder(2, input_dim, lstm_size, m)
-        self.output_layer = LinearBuilder(m, lstm_size, num_words)
+        self.output_layer = LinearBuilder(lstm_size, num_words, m)
 
     @property
     def num_words(self) -> int:
@@ -88,9 +88,9 @@ class LMBuilder:
 
 
 class HighwayBuilder:
-    def __init__(self, m: dy.ParameterCollection, size: int, num_layers: int = 2) -> None:
-        self.linears = [LinearBuilder(m, size, size) for _ in range(num_layers)]
-        self.gates = [LinearBuilder(m, size, size) for _ in range(num_layers)]
+    def __init__(self, size: int, m: dy.ParameterCollection, num_layers: int = 2) -> None:
+        self.linears = [LinearBuilder(size, size, m) for _ in range(num_layers)]
+        self.gates = [LinearBuilder(size, size, m) for _ in range(num_layers)]
 
     def __call__(self, inp: dy.Expression) -> dy.Expression:
         for linear, gate in zip(self.linears, self.gates):
@@ -100,7 +100,7 @@ class HighwayBuilder:
 
 
 class LinearBuilder:
-    def __init__(self, m: dy.ParameterCollection, in_size: int, out_size: int) -> None:
+    def __init__(self, in_size: int, out_size: int, m: dy.ParameterCollection) -> None:
         self.weight = m.add_parameters((out_size, in_size))
         self.bias = m.add_parameters((out_size, ))
 
