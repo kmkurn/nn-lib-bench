@@ -209,7 +209,7 @@ if __name__ == '__main__':
     p.add_argument('save_dir', type=Path, help='save training artifacts here')
     p.add_argument('-d', '--dev-path', type=Path, help='path to dev .pkl file')
     p.add_argument('--lr', type=float, default=1e-3, help='learning rate')
-    p.add_argument('-e', '--max-epochs', type=int, default=50, help='max number of train epochs')
+    p.add_argument('-e', '--max-epochs', type=int, default=50, help='max number of epochs')
     p.add_argument('-b', '--batch-size', type=int, default=16, help='train batch size')
     p.add_argument('-p', '--patience', type=int, default=5, help='patience for early stopping')
     p.add_argument('--device', help='run on this device (e.g. "cpu", "cuda", "cuda:0")')
