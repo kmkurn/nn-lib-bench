@@ -1,23 +1,13 @@
 #!/usr/bin/env python
 
 from pathlib import Path
-from typing import Iterator
 import argparse
 import pickle
 import sys
 
 from text2array import Vocab
-from tqdm import tqdm
 
-from nnlibbench import Sample, make_sample
-
-
-def read_corpus(path: Path, encoding: str = 'utf8') -> Iterator[Sample]:
-    lines = path.read_text(encoding=encoding).split('\n')
-    for line in tqdm(lines, desc='Reading corpus'):
-        text = line.rstrip()
-        if text:
-            yield make_sample(text)
+from nnlibbench import read_corpus
 
 
 if __name__ == '__main__':
