@@ -16,22 +16,20 @@ from ignite.metrics import Loss, MetricsLambda
 from text2array import Batch, BatchIterator, ShuffleIterator, Vocab
 import torch
 
-from nnlibbench import Sample, make_sample
+from nnlibbench import Sample
 from nnlibbench.torch import LMLoss, create_lm
 from nnlibbench.torch.serialization import dump
 
 
 def train(
         trn_path: Path,
+        vocab_path: Path,
         save_dir: Path,
         dev_path: Optional[Path] = None,
-        vocab_path: Optional[Path] = None,
-        encoding: str = 'utf8',
         lr: float = 1e-3,
         max_epochs: int = 50,
         batch_size: int = 16,
         patience: int = 5,
-        numeric: bool = False,
         device: Optional[str] = None,
 ) -> None:
     logging.info('Creating save directory if not exist in %s', save_dir)
@@ -39,32 +37,11 @@ def train(
 
     ### Read/create/load samples and vocab
 
-    trn_samples = read_or_load_samples(trn_path, encoding=encoding)
-    vocab = create_or_load_vocab(trn_samples, path=vocab_path)
+    trn_samples = load_samples(trn_path)
+    vocab = load_vocab(vocab_path)
     dev_samples = None
     if dev_path is not None:
-        dev_samples = read_or_load_samples(dev_path, encoding=encoding, name='dev')
-
-    ### Numericalize samples
-
-    if not numeric:
-        logging.info('Numericalizing train samples')
-        trn_samples = list(vocab.apply_to(trn_samples))
-        if dev_samples is not None:
-            logging.info('Numericalizing dev samples')
-            dev_samples = list(vocab.apply_to(dev_samples))
-
-    ### Save vocab and samples
-
-    fnames = ['vocab.pkl', 'train-samples.pkl', 'dev-samples.pkl']
-    objs = [vocab, trn_samples]
-    if dev_samples is not None:
-        objs.append(dev_samples)
-    for fname, obj in zip(fnames, objs):
-        save_path = save_dir / fname
-        logging.info('Saving to %s', save_path)
-        with open(save_path, 'wb') as f:
-            pickle.dump(obj, f)
+        dev_samples = load_samples(dev_path, name='dev')
 
     ### Create model, optimizer, and loss fn
 
@@ -196,37 +173,18 @@ def train(
         trainer.terminate()
 
 
-def read_or_load_samples(
-        path: Path,
-        encoding: str = 'utf8',
-        name: str = 'train',
-) -> Sequence[Sample]:
-    if path.name.endswith('.pkl'):
-        logging.info('Loading %s samples from %s', name, path)
-        with open(path, 'rb') as fb:
-            samples = pickle.load(fb)
-    else:
-        logging.info('Reading %s samples from %s', name, path)
-        samples = []
-        with open(path, encoding=encoding) as f:
-            for line in f:
-                text = line.rstrip()
-                if text:
-                    samples.append(make_sample(text))
-
+def load_samples(path: Path, name: str = 'train') -> Sequence[Sample]:
+    logging.info('Loading %s samples from %s', name, path)
+    with open(path, 'rb') as f:
+        samples = pickle.load(f)
     logging.info('Found %d %s samples', len(samples), name)
     return samples
 
 
-def create_or_load_vocab(samples: Sequence[Sample], path: Optional[Path] = None) -> Vocab:
-    if path is None:
-        logging.info('Creating vocab from %d samples', len(samples))
-        vocab = Vocab.from_samples(samples)
-    else:
-        logging.info('Reading vocab from %s', path)
-        with open(path, 'rb') as fb:
-            vocab = pickle.load(fb)
-
+def load_vocab(path: Path) -> Vocab:
+    logging.info('Loading vocab from %s', path)
+    with open(path, 'rb') as fb:
+        vocab = pickle.load(fb)
     for name in vocab:
         logging.info('Found %d %s', len(vocab[name]), name)
     return vocab
@@ -246,17 +204,14 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(
         description='Run LM model built with PyTorch.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument('train_path', type=Path, help='path to train samples file')
+    p.add_argument('train_path', type=Path, help='path to train .pkl file')
+    p.add_argument('vocab_path', type=Path, help='path to vocab .pkl file')
     p.add_argument('save_dir', type=Path, help='save training artifacts here')
-    p.add_argument('-d', '--dev-path', type=Path, help='path to dev samples file')
-    p.add_argument('-v', '--vocab-path', type=Path, help='path to vocab file')
-    p.add_argument('--encoding', default='utf8', help='file encoding to use')
+    p.add_argument('-d', '--dev-path', type=Path, help='path to dev .pkl file')
     p.add_argument('--lr', type=float, default=1e-3, help='learning rate')
-    p.add_argument('--max-epochs', type=int, default=50, help='max number of train epochs')
+    p.add_argument('-e', '--max-epochs', type=int, default=50, help='max number of train epochs')
     p.add_argument('-b', '--batch-size', type=int, default=16, help='train batch size')
     p.add_argument('-p', '--patience', type=int, default=5, help='patience for early stopping')
-    p.add_argument(
-        '-n', '--numeric', action='store_true', help='treat samples as already numericalized')
     p.add_argument('--device', help='run on this device (e.g. "cpu", "cuda", "cuda:0")')
     p.add_argument('-l', '--log-level', default='info', help='logging level')
     p.add_argument('-s', '--seed', type=int, default=0, help='random seed')
@@ -275,14 +230,12 @@ if __name__ == '__main__':
 
     train(
         args.train_path,
+        args.vocab_path,
         args.save_dir,
         dev_path=args.dev_path,
-        vocab_path=args.vocab_path,
-        encoding=args.encoding,
         lr=args.lr,
         max_epochs=args.max_epochs,
         batch_size=args.batch_size,
         patience=args.patience,
-        numeric=args.numeric,
         device=args.device,
     )
